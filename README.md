@@ -1,8 +1,8 @@
 # Carburants
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![GitHub Release](https://img.shields.io/github/v/release/romainhe/ha-carburants)](https://github.com/romainhe/ha-carburants/releases)
-[![License](https://img.shields.io/github/license/romainhe/ha-carburants)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/romainhe/ha-prix-carburants)](https://github.com/romainhe/ha-prix-carburants/releases)
+[![License](https://img.shields.io/github/license/romainhe/ha-prix-carburants)](LICENSE)
 
 Intégration Home Assistant qui suit les prix des carburants de stations françaises à partir du flux ouvert [`prix-carburants.gouv.fr`](https://www.prix-carburants.gouv.fr/) (dataset Opendatasoft du ministère de l'Économie). Aucune clé d'API, aucun compte requis.
 
@@ -11,7 +11,7 @@ Intégration Home Assistant qui suit les prix des carburants de stations frança
 ### HACS (dépôt custom)
 
 1. HACS → Intégrations → ⋮ → Dépôts personnalisés.
-2. Ajouter `https://github.com/romainhe/ha-carburants`, catégorie **Integration**.
+2. Ajouter `https://github.com/romainhe/ha-prix-carburants`, catégorie **Integration**.
 3. Installer, puis redémarrer Home Assistant.
 
 ### Manuelle
