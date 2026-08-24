@@ -1,14 +1,14 @@
 {
   "domain": "carburants",
   "name": "Carburants",
-  "version": "0.1.0",
-  "config_flow": true,
-  "documentation": "https://github.com/romainhe/ha-carburants",
-  "issue_tracker": "https://github.com/romainhe/ha-carburants/issues",
   "codeowners": ["@romainhe"],
-  "iot_class": "cloud_polling",
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/romainhe/ha-carburants",
   "integration_type": "hub",
-  "single_config_entry": true,
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/romainhe/ha-carburants/issues",
   "requirements": [],
-  "dependencies": []
+  "single_config_entry": true,
+  "version": "0.1.0"
 }
