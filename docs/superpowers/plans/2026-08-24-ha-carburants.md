@@ -2540,7 +2540,7 @@ git commit -m "feat: add config and options flows"
 **Interfaces:**
 - Consumes: `coordinator.CarburantsCoordinator`, `api.CarburantsApi`, `api.Station`, `const.*`.
 - Produces:
-  - `__init__`: `CarburantsRuntimeData(coordinator)`, `CarburantsConfigEntry = ConfigEntry[CarburantsRuntimeData]`, `async_setup_entry`, `async_unload_entry`, `PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]`
+  - `__init__`: `CarburantsRuntimeData(coordinator)`, `CarburantsConfigEntry = ConfigEntry[CarburantsRuntimeData]`, `async_setup_entry`, `async_unload_entry`, `PLATFORMS = [Platform.SENSOR]` — `Platform.BINARY_SENSOR` is added by Task 7, since `async_forward_entry_setups` imports every listed platform module up front and a module that does not exist yet fails the whole setup
   - `entity.py`: `CarburantsStationEntity(CoordinatorEntity[CarburantsCoordinator])` exposant `station: Station | None`, `available`, `device_info`, et le constructeur `(coordinator, station_id, unique_id)`
   - `sensor.py`: `CarburantsFuelPriceSensor`, `CarburantsLastUpdateSensor`
 
@@ -2667,7 +2667,8 @@ from .const import (
 )
 from .coordinator import CarburantsCoordinator
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+# Platform.BINARY_SENSOR is appended by Task 7, when binary_sensor.py exists.
+PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
 @dataclass
@@ -2909,6 +2910,7 @@ git commit -m "feat: wire up the config entry and add price sensors"
 
 **Files:**
 - Create: `custom_components/carburants/binary_sensor.py`
+- Modify: `custom_components/carburants/__init__.py` — add `Platform.BINARY_SENSOR` to `PLATFORMS`, which Task 6 deliberately left out because the module did not exist yet. Without this, none of the binary sensors are ever created and every test in this task fails.
 - Test: `tests/test_binary_sensor.py`
 
 **Interfaces:**
