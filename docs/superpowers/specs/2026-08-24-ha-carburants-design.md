@@ -171,6 +171,14 @@ Options flow, menu à deux branches :
 
 Un `update_listener` recharge l'entrée à chaque changement d'options.
 
+**Purge du registre.** Retirer une station de la sélection ne suffit pas à faire
+disparaître ses entités : Home Assistant conserve les devices et entités déjà
+enregistrés, qui resteraient indéfiniment `unavailable`. `async_setup_entry`
+purge donc, à chaque chargement, les devices de l'entrée dont l'identifiant
+`(DOMAIN, station_id)` ne figure plus dans `CONF_STATIONS` ; la suppression du
+device emporte ses entités. Sans cela, le texte de l'options flow — « Décocher
+une station la retire ainsi que ses entités » — serait faux.
+
 ## 6. Entités
 
 Un **device par station** (`identifiers = {(DOMAIN, station_id)}`,
