@@ -191,9 +191,41 @@ rechargement de l'entrée ; ce comportement est documenté dans le README.
 | `binary_sensor.<station>_ouvert` | `{station_id}_open` | calculé depuis `opening_hours` dans le fuseau local ; `None` (unknown) si la station ne publie pas d'horaires. Attributs : `automate_24_24`, `horaires_semaine`, `ferme_aujourdhui` |
 | `sensor.<station>_derniere_maj` | `{station_id}_last_update` | `device_class = TIMESTAMP`, `entity_category = DIAGNOSTIC`, = max des `*_maj` de la station |
 
-Le capteur d'ouverture est réévalué à chaque poll **et** toutes les minutes via
-`async_track_time_interval`, afin que les transitions ouverture/fermeture ne
-dépendent pas de l'intervalle de polling.
+### Réveil du capteur d'ouverture
+
+Les transitions ouverture/fermeture ne doivent pas dépendre de l'intervalle de
+polling. Le capteur s'arme donc sur **la prochaine transition d'horaire connue**,
+via `async_track_point_in_time`.
+
+`WeekSchedule` expose pour cela `next_boundary_after(moment) -> datetime | None` :
+le plus petit début ou fin de créneau strictement postérieur à `moment`, déduit
+des mêmes intervalles que ceux servant à `is_open_at`. La recherche dépasse le
+jour courant — une station fermée le dimanche trouve l'ouverture du lundi — et
+renvoie `None` quand aucune transition n'est connue : jour ouvert sans créneau
+publié, ou station sans horaires du tout.
+
+Cycle de vie du timer :
+
+- armé à l'ajout de l'entité, sur `next_boundary_after(dt_util.now())` ;
+- au déclenchement : écriture du nouvel état, puis réarmement sur la transition
+  suivante ;
+- réarmé à chaque mise à jour du coordinator, puisque les horaires publiés
+  peuvent changer — en désabonnant le timer précédent d'abord ;
+- désabonné dans `async_will_remove_from_hass`, et enregistré via
+  `self.async_on_remove` ;
+- si `next_boundary_after` renvoie `None`, **aucun timer n'est armé** : l'état
+  reste celui calculé au dernier poll (`unknown` dans le cas « pas d'horaires
+  publiés »).
+
+Le temps courant et le fuseau viennent de `homeassistant.util.dt`, jamais de
+`datetime.now()`.
+
+**Ce mécanisme est purement local et ne déclenche aucun appel API** : il se
+contente de recalculer l'état à partir du `WeekSchedule` déjà en mémoire. Le seul
+trafic réseau reste le poll du coordinator toutes les 60 minutes. Face à une
+réévaluation à intervalle d'une minute, le point-in-time fait passer de 1440
+réveils par jour et par station à 2–4, avec une transition exacte à la seconde
+plutôt qu'à la minute.
 
 ## 7. Coordinator et events
 
@@ -290,6 +322,10 @@ des fixtures JSON capturées depuis l'API réelle :
 
 - `horaires.py` — jour fermé, `horaire` objet unique, `horaire` liste de
   créneaux, `00.00 → 00.00`, `horaires` absent, automate 24/24 ;
+- `WeekSchedule.next_boundary_after` — depuis le milieu d'un créneau (→ l'heure
+  de fermeture), depuis une période fermée (→ la prochaine ouverture), en fin de
+  journée avec passage au lendemain, sur un créneau `00.00 → 00.00`, sur un jour
+  marqué fermé, et sur un `WeekSchedule` sans créneau publié (→ `None`) ;
 - normalisation `api.py` — prix absent, rupture temporaire vs définitive, `geom`
   manquant, dates ISO ;
 - détection d'events du coordinator — amorçage silencieux au premier poll,

@@ -405,7 +405,7 @@ git commit -m "chore: scaffold integration, dev loop and test harness"
 - Consumes: rien (module pur, aucun import Home Assistant).
 - Produces:
   - `DaySchedule(closed: bool, slots: tuple[tuple[time, time], ...])`
-  - `WeekSchedule(days: dict[int, DaySchedule], automate_24_24: bool)` avec `is_open_at(moment: datetime) -> bool | None` et `as_dict() -> dict[str, str]`
+  - `WeekSchedule(days: dict[int, DaySchedule], automate_24_24: bool)` avec `is_open_at(moment: datetime) -> bool | None`, `next_boundary_after(moment: datetime) -> datetime | None` et `as_dict() -> dict[str, str]`
   - `parse_horaires(raw: str | None, automate_raw: str | None) -> WeekSchedule | None`
 
 Règles issues du flux réel :
@@ -418,6 +418,14 @@ Règles issues du flux réel :
 - `00.00 → 00.00` signifie ouvert 24 h.
 - Une fermeture antérieure à l'ouverture (`22.00 → 06.00`) déborde sur le lendemain.
 - `automate_raw` est la chaîne `"Oui"` / `"Non"` du champ `horaires_automate_24_24`.
+
+`next_boundary_after(moment)` renvoie le plus petit début ou fin de créneau
+strictement postérieur à `moment`, déduit des mêmes intervalles que ceux servant
+à `is_open_at`. La recherche dépasse le jour courant — une station fermée le
+dimanche doit trouver l'ouverture du lundi — et renvoie `None` quand aucune
+transition n'est connue : jour ouvert sans créneau publié, ou station sans
+horaires. C'est cette valeur qui arme le réveil du capteur ouvert/fermé en
+Task 7.
 
 - [ ] **Step 1: Écrire les tests qui échouent**
 
@@ -564,6 +572,78 @@ def test_as_dict_is_human_readable():
         "Mardi": "Fermé",
         "Mercredi": "Inconnu",
     }
+
+
+def test_next_boundary_inside_a_slot_is_the_closing_time():
+    week = parse_horaires(
+        _raw([_day(1, "Lundi", horaire={"@ouverture": "06.30", "@fermeture": "20.30"})]),
+        "Non",
+    )
+    assert week.next_boundary_after(
+        datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
+    ) == datetime(2026, 8, 24, 20, 30, tzinfo=UTC)
+
+
+def test_next_boundary_while_closed_is_the_next_opening():
+    week = parse_horaires(
+        _raw([_day(1, "Lundi", horaire={"@ouverture": "06.30", "@fermeture": "20.30"})]),
+        "Non",
+    )
+    assert week.next_boundary_after(
+        datetime(2026, 8, 24, 5, 0, tzinfo=UTC)
+    ) == datetime(2026, 8, 24, 6, 30, tzinfo=UTC)
+
+
+def test_next_boundary_rolls_over_to_the_next_day():
+    week = parse_horaires(
+        _raw(
+            [
+                _day(
+                    1, "Lundi", horaire={"@ouverture": "06.30", "@fermeture": "20.30"}
+                ),
+                _day(
+                    2, "Mardi", horaire={"@ouverture": "08.00", "@fermeture": "19.00"}
+                ),
+            ]
+        ),
+        "Non",
+    )
+    assert week.next_boundary_after(
+        datetime(2026, 8, 24, 21, 0, tzinfo=UTC)
+    ) == datetime(2026, 8, 25, 8, 0, tzinfo=UTC)
+
+
+def test_next_boundary_on_a_24h_slot_is_the_next_midnight():
+    week = parse_horaires(
+        _raw([_day(1, "Lundi", horaire={"@ouverture": "00.00", "@fermeture": "00.00"})]),
+        "Oui",
+    )
+    assert week.next_boundary_after(
+        datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
+    ) == datetime(2026, 8, 25, 0, 0, tzinfo=UTC)
+
+
+def test_next_boundary_skips_a_closed_day():
+    week = parse_horaires(
+        _raw(
+            [
+                _day(7, "Dimanche", ferme="1"),
+                _day(
+                    1, "Lundi", horaire={"@ouverture": "06.30", "@fermeture": "20.30"}
+                ),
+            ]
+        ),
+        "Non",
+    )
+    # Sunday noon -> Monday morning, the Sunday slots being ignored.
+    assert week.next_boundary_after(
+        datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    ) == datetime(2026, 8, 24, 6, 30, tzinfo=UTC)
+
+
+def test_next_boundary_without_published_slots_is_none():
+    week = parse_horaires(_raw([_day(1, "Lundi"), _day(2, "Mardi")]), "Non")
+    assert week.next_boundary_after(datetime(2026, 8, 24, 12, 0, tzinfo=UTC)) is None
 ```
 
 - [ ] **Step 2: Lancer les tests pour vérifier qu'ils échouent**
@@ -583,7 +663,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
+
+# How far ahead next_boundary_after() looks for the next transition.
+BOUNDARY_LOOKAHEAD_DAYS = 8
 
 DAY_NAMES = {
     1: "Lundi",
@@ -616,25 +699,32 @@ class WeekSchedule:
     days: dict[int, DaySchedule]
     automate_24_24: bool
 
+    def _day_intervals(
+        self, ref: date, tzinfo: tzinfo | None
+    ) -> list[tuple[datetime, datetime]]:
+        """Return the datetime intervals opened by the day `ref`."""
+        day = self.days.get(ref.isoweekday())
+        if day is None or day.closed:
+            return []
+
+        intervals: list[tuple[datetime, datetime]] = []
+        for start, end in day.slots:
+            start_dt = datetime.combine(ref, start, tzinfo=tzinfo)
+            if end <= start:
+                # 00.00-00.00 (24h) or an overnight slot.
+                end_dt = datetime.combine(ref + timedelta(days=1), end, tzinfo=tzinfo)
+            else:
+                end_dt = datetime.combine(ref, end, tzinfo=tzinfo)
+            intervals.append((start_dt, end_dt))
+        return intervals
+
     def _intervals(self, moment: datetime) -> list[tuple[datetime, datetime]]:
         """Return datetime intervals covering `moment`'s day and the previous
         day's overnight spill-over."""
         intervals: list[tuple[datetime, datetime]] = []
         for offset in (-1, 0):
             ref = moment.date() + timedelta(days=offset)
-            day = self.days.get(ref.isoweekday())
-            if day is None or day.closed:
-                continue
-            for start, end in day.slots:
-                start_dt = datetime.combine(ref, start, tzinfo=moment.tzinfo)
-                if end <= start:
-                    # 00.00-00.00 (24h) or an overnight slot.
-                    end_dt = datetime.combine(
-                        ref + timedelta(days=1), end, tzinfo=moment.tzinfo
-                    )
-                else:
-                    end_dt = datetime.combine(ref, end, tzinfo=moment.tzinfo)
-                intervals.append((start_dt, end_dt))
+            intervals.extend(self._day_intervals(ref, moment.tzinfo))
         return intervals
 
     def is_open_at(self, moment: datetime) -> bool | None:
@@ -645,6 +735,25 @@ class WeekSchedule:
         if not day.closed and not day.slots:
             return None
         return any(start <= moment < end for start, end in self._intervals(moment))
+
+    def next_boundary_after(self, moment: datetime) -> datetime | None:
+        """Return the next opening or closing time strictly after `moment`.
+
+        Looks a full week ahead, so a station closed on Sunday still finds
+        Monday's opening. Returns None when the schedule publishes no slot at
+        all — the caller must then not schedule anything.
+        """
+        boundaries: list[datetime] = []
+        # Start one day back so an overnight slot's closing time is considered.
+        for offset in range(-1, BOUNDARY_LOOKAHEAD_DAYS + 1):
+            ref = moment.date() + timedelta(days=offset)
+            for start_dt, end_dt in self._day_intervals(ref, moment.tzinfo):
+                boundaries.extend(
+                    boundary
+                    for boundary in (start_dt, end_dt)
+                    if boundary > moment
+                )
+        return min(boundaries) if boundaries else None
 
     def as_dict(self) -> dict[str, str]:
         """Return a human-readable week, for entity attributes."""
@@ -741,13 +850,13 @@ def parse_horaires(raw: str | None, automate_raw: str | None) -> WeekSchedule | 
 - [ ] **Step 4: Lancer les tests pour vérifier qu'ils passent**
 
 Run: `python -m pytest tests/test_horaires.py -v && ruff check . && ruff format --check .`
-Expected: 10 tests PASS
+Expected: 16 tests PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add custom_components/carburants/horaires.py tests/test_horaires.py
-git commit -m "feat: parse station opening hours"
+git commit -m "feat: parse station opening hours and next transition"
 ```
 
 ---
@@ -2817,7 +2926,20 @@ git commit -m "feat: wire up the config entry and add price sensors"
 - Consumes: `entity.CarburantsStationEntity`, `const.{outage_unique_id, open_unique_id, FUELS}`, `horaires.WeekSchedule`.
 - Produces: `CarburantsFuelOutageBinarySensor`, `CarburantsOpenBinarySensor`.
 
-Le capteur d'ouverture s'appuie sur `station.opening_hours.is_open_at(dt_util.now())`. Il renvoie `None` (donc `unknown`) quand la station ne publie pas d'horaires, et il se réévalue toutes les minutes via `async_track_time_interval` en plus des rafraîchissements du coordinator.
+Le capteur d'ouverture s'appuie sur `station.opening_hours.is_open_at(dt_util.now())` et renvoie `None` (donc `unknown`) quand la station ne publie pas d'horaires.
+
+Son réveil est **programmé sur la prochaine transition d'horaire**, via
+`async_track_point_in_time` armé sur `WeekSchedule.next_boundary_after` :
+
+- armé à l'ajout de l'entité ;
+- au déclenchement : écriture du nouvel état, puis réarmement sur la transition suivante ;
+- réarmé à chaque mise à jour du coordinator, puisque les horaires publiés peuvent changer — en désabonnant le timer précédent d'abord ;
+- désabonné dans `async_will_remove_from_hass`, et enregistré via `self.async_on_remove` ;
+- si `next_boundary_after` renvoie `None`, **aucun timer n'est armé** : l'état reste celui calculé au dernier poll.
+
+Le temps courant et le fuseau viennent de `homeassistant.util.dt`, jamais de `datetime.now()`.
+
+Ce mécanisme est purement local et ne déclenche **aucun appel API** : il recalcule l'état à partir du `WeekSchedule` déjà en mémoire. Le seul trafic réseau reste le poll du coordinator. Face à une réévaluation chaque minute, il fait passer de 1440 réveils par jour et par station à 2–4, avec une transition exacte à la seconde.
 
 - [ ] **Step 1: Écrire les tests qui échouent**
 
@@ -2900,9 +3022,10 @@ async def test_open_sensor_uses_schedule(hass, freezer: FrozenDateTimeFactory):
     assert state.attributes["horaires_semaine"] == {"Lundi": "06:30-20:30"}
 
 
-async def test_open_sensor_reevaluates_every_minute(
+async def test_open_sensor_flips_at_the_scheduled_boundary(
     hass, freezer: FrozenDateTimeFactory
 ):
+    # One minute before Monday's 20:30 closing time.
     freezer.move_to(datetime(2026, 8, 24, 20, 29, tzinfo=UTC))
     await _setup(hass, STATION_WITH_PRICES)
     assert (
@@ -2910,8 +3033,96 @@ async def test_open_sensor_reevaluates_every_minute(
         == "on"
     )
 
-    freezer.move_to(datetime(2026, 8, 24, 20, 31, tzinfo=UTC))
-    async_fire_time_changed(hass, datetime(2026, 8, 24, 20, 31, tzinfo=UTC))
+    # No wake-up in between: the timer is armed on 20:30 exactly.
+    freezer.move_to(datetime(2026, 8, 24, 20, 29, 59, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 24, 20, 29, 59, tzinfo=UTC))
+    await hass.async_block_till_done()
+    assert (
+        hass.states.get("binary_sensor.route_de_la_wantzenau_strasbourg_open").state
+        == "on"
+    )
+
+    freezer.move_to(datetime(2026, 8, 24, 20, 30, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 24, 20, 30, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+    assert (
+        hass.states.get("binary_sensor.route_de_la_wantzenau_strasbourg_open").state
+        == "off"
+    )
+
+
+async def test_open_sensor_rearms_on_the_following_boundary(
+    hass, freezer: FrozenDateTimeFactory
+):
+    freezer.move_to(datetime(2026, 8, 24, 20, 29, tzinfo=UTC))
+    await _setup(hass, STATION_WITH_PRICES)
+
+    # Closing time: the sensor must re-arm on next Monday's 06:30 opening,
+    # the fixture only publishing hours for Monday.
+    freezer.move_to(datetime(2026, 8, 24, 20, 30, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 24, 20, 30, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+    freezer.move_to(datetime(2026, 8, 31, 6, 30, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 31, 6, 30, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+    assert (
+        hass.states.get("binary_sensor.route_de_la_wantzenau_strasbourg_open").state
+        == "on"
+    )
+
+
+async def test_open_sensor_without_hours_arms_no_timer(
+    hass, freezer: FrozenDateTimeFactory
+):
+    freezer.move_to(datetime(2026, 8, 24, 12, 0, tzinfo=UTC))
+    await _setup(hass, STATION_NO_HOURS)
+    assert (
+        hass.states.get("binary_sensor.49_rte_du_rhin_strasbourg_open").state
+        == "unknown"
+    )
+
+    # next_boundary_after() returned None: nothing is scheduled, and time
+    # passing changes nothing.
+    freezer.move_to(datetime(2026, 8, 25, 12, 0, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 25, 12, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+    assert (
+        hass.states.get("binary_sensor.49_rte_du_rhin_strasbourg_open").state
+        == "unknown"
+    )
+
+
+async def test_open_sensor_rearms_when_the_coordinator_updates(
+    hass, freezer: FrozenDateTimeFactory
+):
+    freezer.move_to(datetime(2026, 8, 24, 12, 0, tzinfo=UTC))
+    entry = await _setup(hass, STATION_WITH_PRICES)
+    coordinator = entry.runtime_data.coordinator
+
+    # The station starts publishing a shorter Monday: 06:30-13:00.
+    shortened = {
+        **STATION_WITH_PRICES,
+        "horaires": (
+            '{"@automate-24-24": "", "jour": [{"@id": "1", "@nom": "Lundi", '
+            '"@ferme": "", "horaire": {"@ouverture": "06.30", '
+            '"@fermeture": "13.00"}}]}'
+        ),
+    }
+    with patch.object(
+        coordinator.api,
+        "async_fetch",
+        AsyncMock(return_value=[parse_station(shortened)]),
+    ):
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    # The timer must now fire on the new 13:00 boundary, not the old 20:30.
+    freezer.move_to(datetime(2026, 8, 24, 13, 0, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 24, 13, 0, tzinfo=UTC))
     await hass.async_block_till_done()
 
     assert (
@@ -2920,7 +3131,7 @@ async def test_open_sensor_reevaluates_every_minute(
     )
 ```
 
-Note pour l'implémenteur : ce test suppose que le fuseau de l'instance de test est UTC (c'est le défaut de `pytest-homeassistant-custom-component`). Si le slug d'`entity_id` diffère, le relever via `hass.states.async_entity_ids("binary_sensor")` et corriger la constante du test.
+Note pour l'implémenteur : ces tests supposent que le fuseau de l'instance de test est UTC (c'est le défaut de `pytest-homeassistant-custom-component`). Si un slug d'`entity_id` diffère, le relever via `hass.states.async_entity_ids("binary_sensor")` et corriger la constante du test, pas l'implémentation.
 
 - [ ] **Step 2: Lancer les tests pour vérifier qu'ils échouent**
 
@@ -2934,24 +3145,21 @@ Expected: FAIL — aucune entité `binary_sensor` n'existe.
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
 
 from . import CarburantsConfigEntry
 from .const import FUELS, open_unique_id, outage_unique_id
 from .coordinator import CarburantsCoordinator
 from .entity import CarburantsStationEntity
-
-OPEN_REFRESH_INTERVAL = timedelta(minutes=1)
 
 
 async def async_setup_entry(
@@ -3025,20 +3233,61 @@ class CarburantsOpenBinarySensor(CarburantsStationEntity, BinarySensorEntity):
     ) -> None:
         """Initialise the open/closed sensor."""
         super().__init__(coordinator, station_id, open_unique_id(station_id))
+        self._unsub_boundary: CALLBACK_TYPE | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Re-evaluate every minute, independently of the polling interval."""
+        """Arm the wake-up on the next opening or closing time."""
         await super().async_added_to_hass()
-        self.async_on_remove(
-            async_track_time_interval(
-                self.hass, self._handle_tick, OPEN_REFRESH_INTERVAL
-            )
+        self.async_on_remove(self._async_cancel_boundary)
+        self._async_schedule_boundary()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Drop the pending wake-up before the entity goes away."""
+        self._async_cancel_boundary()
+        await super().async_will_remove_from_hass()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Re-arm on every poll: the published hours may have changed."""
+        self._async_schedule_boundary()
+        super()._handle_coordinator_update()
+
+    @callback
+    def _async_cancel_boundary(self) -> None:
+        """Cancel the pending wake-up, if any."""
+        if self._unsub_boundary is not None:
+            self._unsub_boundary()
+            self._unsub_boundary = None
+
+    @callback
+    def _async_schedule_boundary(self) -> None:
+        """Schedule a wake-up on the next transition, if one is known.
+
+        Purely local: this only recomputes the state from the WeekSchedule
+        already in memory, and never hits the API. When the schedule knows of
+        no upcoming transition, nothing is armed and the state stays as
+        computed at the last poll.
+        """
+        self._async_cancel_boundary()
+
+        station = self.station
+        if station is None or station.opening_hours is None:
+            return
+
+        boundary = station.opening_hours.next_boundary_after(dt_util.now())
+        if boundary is None:
+            return
+
+        self._unsub_boundary = async_track_point_in_time(
+            self.hass, self._handle_boundary, boundary
         )
 
     @callback
-    def _handle_tick(self, _now) -> None:
-        """Write the state again so opening transitions are picked up."""
+    def _handle_boundary(self, _now) -> None:
+        """Write the new state, then arm the following transition."""
+        self._unsub_boundary = None
         self.async_write_ha_state()
+        self._async_schedule_boundary()
 
     @property
     def is_on(self) -> bool | None:
@@ -3074,7 +3323,7 @@ class CarburantsOpenBinarySensor(CarburantsStationEntity, BinarySensorEntity):
 - [ ] **Step 4: Lancer les tests pour vérifier qu'ils passent**
 
 Run: `python -m pytest -v && ruff check . && ruff format --check .`
-Expected: toute la suite PASS (5 tests dans ce fichier, ~48 au total)
+Expected: toute la suite PASS (7 tests dans ce fichier, ~56 au total)
 
 - [ ] **Step 5: Commit**
 
@@ -3162,7 +3411,7 @@ Sur le modèle de celui de `ha-powens`, documenter :
   - les champs `latitude` / `longitude` de premier niveau du dataset sont ignorés au profit de `geom` — ils sont dans une projection inexploitable,
   - les capteurs de prix n'ont **pas** de `device_class` (`monetary` exigerait un code devise et interdirait `state_class: measurement`),
   - une rupture `definitive` ne crée aucune entité : elle signifie que la station ne distribue pas ce carburant,
-  - le capteur *Ouvert* se réévalue toutes les minutes, indépendamment de l'intervalle de relève ;
+  - le capteur *Ouvert* ne se rafraîchit pas à intervalle fixe : il s'arme sur `WeekSchedule.next_boundary_after` via `async_track_point_in_time`, purement en local, sans appel API — 2 à 4 réveils par jour et par station au lieu de 1440, avec une transition exacte à la seconde. Aucun timer n'est armé quand la station ne publie pas d'horaires,
 - la règle i18n : toute clé ajoutée à `strings.json` doit exister dans `translations/en.json` **et** `translations/fr.json`.
 
 - [ ] **Step 3: Essai réel dans Home Assistant**
@@ -3206,9 +3455,10 @@ git tag v0.1.0
 | §4 Couche API, trois méthodes, haversine | Task 3 |
 | §5 Config flow, options flow, bornes | Task 5 |
 | §6 Entités, device, unique_ids, règle des carburants suivis | Task 1 (`unique_id`), Task 6 (sensors), Task 7 (binary sensors) |
+| §6 Réveil du capteur d'ouverture sur `next_boundary_after` | Task 2 (`horaires.py`), Task 7 (`async_track_point_in_time`) |
 | §7 Coordinator, amorçage silencieux, deux events, résolution d'`entity_id` | Task 4 |
 | §8 Gestion des erreurs (`UpdateFailed`, station disparue, `cannot_connect`) | Task 3, Task 4, Task 5, Task 6 |
 | §9 Tests | Tasks 2 à 7 |
 | §10 i18n | Task 5, rappel dans le `CLAUDE.md` de la Task 8 |
 
-**Cohérence des types :** `price_unique_id` / `outage_unique_id` / `open_unique_id` / `last_update_unique_id` sont définis en Task 1 et consommés à l'identique en Tasks 4, 6 et 7. `Station.tracked_fuels` est défini en Task 3 et utilisé en Tasks 4, 5, 6 et 7. `CarburantsStationEntity(coordinator, station_id, unique_id)` est défini en Task 6 et sous-classé en Task 7. `entry.runtime_data.coordinator` est produit en Task 6 et consommé par les deux plateformes.
+**Cohérence des types :** `price_unique_id` / `outage_unique_id` / `open_unique_id` / `last_update_unique_id` sont définis en Task 1 et consommés à l'identique en Tasks 4, 6 et 7. `Station.tracked_fuels` est défini en Task 3 et utilisé en Tasks 4, 5, 6 et 7. `WeekSchedule.next_boundary_after` est défini en Task 2 et consommé en Task 7. `CarburantsStationEntity(coordinator, station_id, unique_id)` est défini en Task 6 et sous-classé en Task 7. `entry.runtime_data.coordinator` est produit en Task 6 et consommé par les deux plateformes.
