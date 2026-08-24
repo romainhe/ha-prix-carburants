@@ -1,0 +1,97 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Carburants",
+        "description": "Comment voulez-vous trouver les stations à surveiller ?",
+        "menu_options": {
+          "recherche": "Rechercher par code postal ou ville",
+          "proximite": "Rechercher autour d'un point"
+        }
+      },
+      "recherche": {
+        "title": "Rechercher une station",
+        "data": { "query": "Code postal ou ville" }
+      },
+      "proximite": {
+        "title": "Rechercher autour d'un point",
+        "data": { "location": "Position et rayon" }
+      },
+      "stations": {
+        "title": "Stations à surveiller",
+        "data": { "stations": "Stations" }
+      }
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "no_results": "Aucune station trouvée pour cette recherche.",
+      "no_station_selected": "Sélectionnez au moins une station."
+    },
+    "abort": {
+      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Carburants",
+        "menu_options": {
+          "stations": "Ajouter ou retirer des stations",
+          "reglages": "Réglages"
+        }
+      },
+      "stations": {
+        "title": "Ajouter ou retirer des stations",
+        "menu_options": {
+          "recherche": "Rechercher par code postal ou ville",
+          "proximite": "Rechercher autour d'un point"
+        }
+      },
+      "recherche": {
+        "title": "Rechercher une station",
+        "data": { "query": "Code postal ou ville" }
+      },
+      "proximite": {
+        "title": "Rechercher autour d'un point",
+        "data": { "location": "Position et rayon" }
+      },
+      "selection": {
+        "title": "Stations à surveiller",
+        "description": "Décocher une station la retire ainsi que ses entités.",
+        "data": { "stations": "Stations" }
+      },
+      "reglages": {
+        "title": "Réglages",
+        "data": {
+          "scan_interval": "Intervalle de relève (minutes)",
+          "price_event_threshold": "Variation minimale pour émettre un event (€/L)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "no_results": "Aucune station trouvée pour cette recherche.",
+      "no_station_selected": "Sélectionnez au moins une station."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "gazole": { "name": "Gazole" },
+      "sp95": { "name": "SP95" },
+      "sp98": { "name": "SP98" },
+      "e10": { "name": "E10" },
+      "e85": { "name": "E85" },
+      "gplc": { "name": "GPLc" },
+      "last_update": { "name": "Dernière mise à jour" }
+    },
+    "binary_sensor": {
+      "gazole_outage": { "name": "Rupture Gazole" },
+      "sp95_outage": { "name": "Rupture SP95" },
+      "sp98_outage": { "name": "Rupture SP98" },
+      "e10_outage": { "name": "Rupture E10" },
+      "e85_outage": { "name": "Rupture E85" },
+      "gplc_outage": { "name": "Rupture GPLc" },
+      "open": { "name": "Ouvert" }
+    }
+  }
+}
