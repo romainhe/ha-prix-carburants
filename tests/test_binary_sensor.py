@@ -10,8 +10,14 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.carburants.api import parse_station
-from custom_components.carburants.const import CONF_STATIONS, DOMAIN
+from custom_components.carburants.const import CONF_SCAN_INTERVAL, CONF_STATIONS, DOMAIN
 from tests.fixtures.records import STATION_NO_HOURS, STATION_WITH_PRICES
+
+# Far larger than any freezer.move_to() span used below (the widest is the
+# ~7-day jump in test_open_sensor_rearms_on_the_following_boundary), so the
+# coordinator's own periodic poll can never coincide with -- and confound --
+# the boundary timer under test.
+_NO_INTERFERING_POLL_MINUTES = 100_000
 
 
 async def _setup(hass, record) -> MockConfigEntry:
@@ -19,6 +25,7 @@ async def _setup(hass, record) -> MockConfigEntry:
         domain=DOMAIN,
         unique_id=DOMAIN,
         data={CONF_STATIONS: [str(record["id"])]},
+        options={CONF_SCAN_INTERVAL: _NO_INTERFERING_POLL_MINUTES},
     )
     entry.add_to_hass(hass)
     # These tests assert on UTC wall-clock boundaries; the hass fixture
@@ -104,58 +111,45 @@ async def test_open_sensor_flips_at_the_scheduled_boundary(
 async def test_open_sensor_rearms_on_the_following_boundary(
     hass, freezer: FrozenDateTimeFactory
 ):
-    # The coordinator's own 60-minute scan interval would otherwise fire a
-    # real (unmocked) API call once the freezer jumps a week ahead, so the
-    # fetch stays patched for the whole test, not just through setup.
-    with patch(
-        "custom_components.carburants.CarburantsApi.async_fetch",
-        AsyncMock(return_value=[parse_station(STATION_WITH_PRICES)]),
-    ):
-        freezer.move_to(datetime(2026, 8, 24, 20, 29, tzinfo=UTC))
-        await _setup(hass, STATION_WITH_PRICES)
+    freezer.move_to(datetime(2026, 8, 24, 20, 29, tzinfo=UTC))
+    await _setup(hass, STATION_WITH_PRICES)
 
-        # Closing time: the sensor must re-arm on next Monday's 06:30
-        # opening, the fixture only publishing hours for Monday.
-        freezer.move_to(datetime(2026, 8, 24, 20, 30, tzinfo=UTC))
-        async_fire_time_changed(hass, datetime(2026, 8, 24, 20, 30, tzinfo=UTC))
-        await hass.async_block_till_done()
+    # Closing time: the sensor must re-arm on next Monday's 06:30 opening,
+    # the fixture only publishing hours for Monday.
+    freezer.move_to(datetime(2026, 8, 24, 20, 30, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 24, 20, 30, tzinfo=UTC))
+    await hass.async_block_till_done()
 
-        freezer.move_to(datetime(2026, 8, 31, 6, 30, tzinfo=UTC))
-        async_fire_time_changed(hass, datetime(2026, 8, 31, 6, 30, tzinfo=UTC))
-        await hass.async_block_till_done()
+    freezer.move_to(datetime(2026, 8, 31, 6, 30, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 31, 6, 30, tzinfo=UTC))
+    await hass.async_block_till_done()
 
-        assert (
-            hass.states.get("binary_sensor.route_de_la_wantzenau_strasbourg_open").state
-            == "on"
-        )
+    assert (
+        hass.states.get("binary_sensor.route_de_la_wantzenau_strasbourg_open").state
+        == "on"
+    )
 
 
 async def test_open_sensor_without_hours_arms_no_timer(
     hass, freezer: FrozenDateTimeFactory
 ):
-    # Same reasoning as above: the 24h jump crosses the coordinator's scan
-    # interval, so the fetch must stay mocked for the whole test.
-    with patch(
-        "custom_components.carburants.CarburantsApi.async_fetch",
-        AsyncMock(return_value=[parse_station(STATION_NO_HOURS)]),
-    ):
-        freezer.move_to(datetime(2026, 8, 24, 12, 0, tzinfo=UTC))
-        await _setup(hass, STATION_NO_HOURS)
-        assert (
-            hass.states.get("binary_sensor.49_rte_du_rhin_strasbourg_open").state
-            == "unknown"
-        )
+    freezer.move_to(datetime(2026, 8, 24, 12, 0, tzinfo=UTC))
+    await _setup(hass, STATION_NO_HOURS)
+    assert (
+        hass.states.get("binary_sensor.49_rte_du_rhin_strasbourg_open").state
+        == "unknown"
+    )
 
-        # next_boundary_after() returned None: nothing is scheduled, and
-        # time passing changes nothing.
-        freezer.move_to(datetime(2026, 8, 25, 12, 0, tzinfo=UTC))
-        async_fire_time_changed(hass, datetime(2026, 8, 25, 12, 0, tzinfo=UTC))
-        await hass.async_block_till_done()
+    # next_boundary_after() returned None: nothing is scheduled, and time
+    # passing changes nothing.
+    freezer.move_to(datetime(2026, 8, 25, 12, 0, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 25, 12, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
 
-        assert (
-            hass.states.get("binary_sensor.49_rte_du_rhin_strasbourg_open").state
-            == "unknown"
-        )
+    assert (
+        hass.states.get("binary_sensor.49_rte_du_rhin_strasbourg_open").state
+        == "unknown"
+    )
 
 
 async def test_open_sensor_rearms_when_the_coordinator_updates(
@@ -165,11 +159,7 @@ async def test_open_sensor_rearms_when_the_coordinator_updates(
     entry = await _setup(hass, STATION_WITH_PRICES)
     coordinator = entry.runtime_data.coordinator
 
-    # The station starts publishing a shorter Monday: 06:30-13:00. The mock
-    # stays active (not just for the manual refresh below) since the
-    # coordinator's own 60-minute scan interval will otherwise also fire a
-    # real, unmocked poll once the freezer reaches 13:00 -- and the station
-    # keeps publishing the shortened hours from here on, not just once.
+    # The station starts publishing a shorter Monday: 06:30-13:00.
     shortened = {
         **STATION_WITH_PRICES,
         "horaires": (
@@ -186,13 +176,15 @@ async def test_open_sensor_rearms_when_the_coordinator_updates(
         await coordinator.async_refresh()
         await hass.async_block_till_done()
 
-        # The timer must now fire on the new 13:00 boundary, not the old
-        # 20:30 one.
-        freezer.move_to(datetime(2026, 8, 24, 13, 0, tzinfo=UTC))
-        async_fire_time_changed(hass, datetime(2026, 8, 24, 13, 0, tzinfo=UTC))
-        await hass.async_block_till_done()
+    # The timer must now fire on the new 13:00 boundary, not the old 20:30
+    # one. The coordinator's own scan interval is set far beyond this span
+    # (see _NO_INTERFERING_POLL_MINUTES), so no periodic poll can fire here
+    # and mask a broken re-arm.
+    freezer.move_to(datetime(2026, 8, 24, 13, 0, tzinfo=UTC))
+    async_fire_time_changed(hass, datetime(2026, 8, 24, 13, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
 
-        assert (
-            hass.states.get("binary_sensor.route_de_la_wantzenau_strasbourg_open").state
-            == "off"
-        )
+    assert (
+        hass.states.get("binary_sensor.route_de_la_wantzenau_strasbourg_open").state
+        == "off"
+    )
