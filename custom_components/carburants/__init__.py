@@ -20,8 +20,7 @@ from .const import (
 )
 from .coordinator import CarburantsCoordinator
 
-# Platform.BINARY_SENSOR is appended by Task 7, when binary_sensor.py exists.
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 
 @dataclass
