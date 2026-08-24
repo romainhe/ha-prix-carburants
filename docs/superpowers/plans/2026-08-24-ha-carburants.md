@@ -2557,6 +2557,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.carburants.api import parse_station
 from custom_components.carburants.const import CONF_STATIONS, DOMAIN
+from homeassistant.config_entries import ConfigEntryState
 from tests.fixtures.records import STATION_WITH_PRICES
 
 
@@ -2632,7 +2633,14 @@ async def test_unload_entry(hass):
     entry = await _setup(hass)
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert hass.states.get("sensor.route_de_la_wantzenau_strasbourg_gazole") is None
+
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    # Unloading a config entry does not delete the states of registered
+    # entities: Entity.__async_remove_impl keeps them as unavailable and
+    # stamps `restored: True`. Only removing the entry deletes them.
+    state = hass.states.get("sensor.route_de_la_wantzenau_strasbourg_gazole")
+    assert state.state == "unavailable"
+    assert state.attributes.get("restored") is True
 ```
 
 - [ ] **Step 2: Lancer les tests pour vérifier qu'ils échouent**
