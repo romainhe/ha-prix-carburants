@@ -3,21 +3,27 @@
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.carburants.api import parse_station
 from custom_components.carburants.const import CONF_STATIONS, DOMAIN
-from tests.fixtures.records import STATION_WITH_PRICES
+from tests.fixtures.records import STATION_NO_HOURS, STATION_WITH_PRICES
 
 
-async def _setup(hass) -> MockConfigEntry:
+async def _setup(hass, stations=None, records=None) -> MockConfigEntry:
+    if stations is None:
+        stations = ["67000002"]
+    if records is None:
+        records = [parse_station(STATION_WITH_PRICES)]
     entry = MockConfigEntry(
-        domain=DOMAIN, unique_id=DOMAIN, data={CONF_STATIONS: ["67000002"]}
+        domain=DOMAIN, unique_id=DOMAIN, data={CONF_STATIONS: stations}
     )
     entry.add_to_hass(hass)
     with patch(
         "custom_components.carburants.CarburantsApi.async_fetch",
-        AsyncMock(return_value=[parse_station(STATION_WITH_PRICES)]),
+        AsyncMock(return_value=records),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -74,6 +80,65 @@ async def test_entities_become_unavailable_when_station_disappears(hass):
 
     state = hass.states.get("sensor.route_de_la_wantzenau_strasbourg_gazole")
     assert state.state == "unavailable"
+
+    # A station merely missing from one poll (API hiccup, station
+    # temporarily absent from the dataset) must keep its device: it is
+    # still configured, only unavailable.
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get_device(identifiers={(DOMAIN, "67000002")})
+    assert device is not None
+
+
+async def test_removed_station_device_and_entities_are_purged(hass):
+    entry = await _setup(
+        hass,
+        stations=["67000002", "67000026"],
+        records=[
+            parse_station(STATION_WITH_PRICES),
+            parse_station(STATION_NO_HOURS),
+        ],
+    )
+
+    device_registry = dr.async_get(hass)
+    assert (
+        device_registry.async_get_device(identifiers={(DOMAIN, "67000002")}) is not None
+    )
+    kept_device = device_registry.async_get_device(identifiers={(DOMAIN, "67000026")})
+    assert kept_device is not None
+
+    entity_registry = er.async_get(hass)
+    removed_entities = [
+        entry_.entity_id
+        for entry_ in er.async_entries_for_device(
+            entity_registry,
+            device_registry.async_get_device(identifiers={(DOMAIN, "67000002")}).id,
+        )
+    ]
+    assert removed_entities
+
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_STATIONS: ["67000026"]}
+    )
+    with patch(
+        "custom_components.carburants.CarburantsApi.async_fetch",
+        AsyncMock(return_value=[parse_station(STATION_NO_HOURS)]),
+    ):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    removed_device = device_registry.async_get_device(
+        identifiers={(DOMAIN, "67000002")}
+    )
+    assert removed_device is None
+    for entity_id in removed_entities:
+        assert hass.states.get(entity_id) is None
+
+    kept_device = device_registry.async_get_device(identifiers={(DOMAIN, "67000026")})
+    assert kept_device is not None
+    kept_entities = er.async_entries_for_device(entity_registry, kept_device.id)
+    assert kept_entities
+    for entry_ in kept_entities:
+        assert hass.states.get(entry_.entity_id) is not None
 
 
 async def test_unload_entry(hass):
