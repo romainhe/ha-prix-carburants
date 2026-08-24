@@ -36,9 +36,11 @@ Un device est créé par station suivie, avec les entités suivantes :
 | Entité | Domaine | Description |
 |---|---|---|
 | `sensor.<station>_<carburant>` | `sensor` | Prix du carburant (`€/L`) |
-| `binary_sensor.<station>_<carburant>_rupture` | `binary_sensor` | Rupture de stock sur ce carburant |
-| `binary_sensor.<station>_ouvert` | `binary_sensor` | Station ouverte ou fermée |
-| `sensor.<station>_derniere_mise_a_jour` | `sensor` | Diagnostic : horodatage de la dernière mise à jour de prix |
+| `binary_sensor.<station>_<carburant>_outage` (en) / `binary_sensor.<station>_rupture_<carburant>` (fr) | `binary_sensor` | Rupture de stock sur ce carburant |
+| `binary_sensor.<station>_open` (en) / `binary_sensor.<station>_ouvert` (fr) | `binary_sensor` | Station ouverte ou fermée |
+| `sensor.<station>_last_update` (en) / `sensor.<station>_derniere_mise_a_jour` (fr) | `sensor` | Diagnostic : horodatage de la dernière mise à jour de prix |
+
+L'`object_id` de chaque entité est le slug du nom de l'entité *traduit*, qui suit donc la langue de l'instance Home Assistant : par exemple l'entité de rupture du gazole est `binary_sensor.<station>_gazole_outage` sur une instance en anglais, `binary_sensor.<station>_rupture_gazole` sur une instance en français. Voir `tests/test_binary_sensor.py` pour les formes anglaises exactes.
 
 Seuls les carburants effectivement distribués par la station reçoivent des entités : un carburant en rupture *définitive* (la station ne le vend pas) n'a pas d'entité.
 
@@ -61,7 +63,7 @@ Deux `event_type` sont émis sur le bus Home Assistant à chaque relevé où un 
 | `latitude` / `longitude` | Coordonnées de la station |
 | `fuel` | Clé du carburant (`gazole`, `sp95`, …) |
 | `fuel_label` | Libellé du carburant |
-| `entity_id` | `entity_id` du capteur de prix concerné |
+| `entity_id` | `entity_id` du capteur de prix concerné, ou `None` si cette entité n'a jamais été créée (voir « Limites connues » : jeu d'entités figé au chargement) |
 | `direction` | `"up"` ou `"down"` |
 | `old_price` / `new_price` | Ancien et nouveau prix (`€/L`) |
 | `delta` | Variation (`€/L`), signée |
@@ -81,7 +83,7 @@ Deux `event_type` sont émis sur le bus Home Assistant à chaque relevé où un 
 | `latitude` / `longitude` | Coordonnées de la station |
 | `fuel` | Clé du carburant |
 | `fuel_label` | Libellé du carburant |
-| `entity_id` | `entity_id` du capteur de rupture concerné |
+| `entity_id` | `entity_id` du capteur de rupture concerné, ou `None` si cette entité n'a jamais été créée (voir « Limites connues » : jeu d'entités figé au chargement) |
 | `state` | `"start"` ou `"end"` |
 | `outage_type` | Type de rupture (`temporaire` ou `definitive`) |
 | `since` | Horodatage ISO 8601 du début de la rupture |
@@ -107,7 +109,7 @@ automation:
             ({{ trigger.event.data.delta }} €)
           data:
             url: >-
-              /history?entity_id={{ trigger.event.data.entity_id }}
+              {% if trigger.event.data.entity_id %}/history?entity_id={{ trigger.event.data.entity_id }}{% endif %}
 ```
 
 ### Exemple « rupture »

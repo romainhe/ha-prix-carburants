@@ -190,10 +190,16 @@ class CarburantsApi:
                 response = await self._session.get(API_URL, params=params)
                 response.raise_for_status()
                 payload = await response.json()
+            if not isinstance(payload, dict):
+                raise CarburantsApiError("Unexpected payload from the fuel dataset")
         except TimeoutError as err:
             raise CarburantsApiError("Timeout querying the fuel dataset") from err
         except aiohttp.ClientError as err:
             raise CarburantsApiError(f"Error querying the fuel dataset: {err}") from err
+        except ValueError as err:
+            raise CarburantsApiError(
+                f"Invalid payload from the fuel dataset: {err}"
+            ) from err
 
         results = payload.get("results")
         if not isinstance(results, list):
@@ -204,6 +210,14 @@ class CarburantsApi:
         """Fetch the current state of the given stations in one request."""
         if not station_ids:
             return []
+        if len(station_ids) > SEARCH_LIMIT:
+            _LOGGER.warning(
+                "%d station(s) configured but only %d can be fetched per request; "
+                "%d station(s) will be ignored",
+                len(station_ids),
+                SEARCH_LIMIT,
+                len(station_ids) - SEARCH_LIMIT,
+            )
         joined = ",".join(str(station_id) for station_id in station_ids)
         records = await self._async_query(f"id in ({joined})")
         return [parse_station(record) for record in records]
@@ -214,7 +228,7 @@ class CarburantsApi:
         if cleaned.isdigit() and len(cleaned) == 5:
             where = f'cp="{cleaned}"'
         else:
-            escaped = cleaned.replace('"', '\\"')
+            escaped = cleaned.replace("\\", "\\\\").replace('"', '\\"')
             where = f'search(ville, "{escaped}")'
         records = await self._async_query(where)
         stations = [parse_station(record) for record in records]

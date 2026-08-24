@@ -23,12 +23,12 @@
       }
     },
     "error": {
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "cannot_connect": "Échec de la connexion",
       "no_results": "Aucune station trouvée pour cette recherche.",
       "no_station_selected": "Sélectionnez au moins une station."
     },
     "abort": {
-      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]"
+      "single_instance_allowed": "Déjà configuré. Une seule configuration est possible."
     }
   },
   "options": {
@@ -69,7 +69,7 @@
       }
     },
     "error": {
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "cannot_connect": "Échec de la connexion",
       "no_results": "Aucune station trouvée pour cette recherche.",
       "no_station_selected": "Sélectionnez au moins une station."
     }

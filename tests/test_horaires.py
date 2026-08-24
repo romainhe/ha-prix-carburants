@@ -119,6 +119,25 @@ def test_overnight_slot_spills_into_next_day():
     assert week.is_open_at(datetime(2026, 8, 24, 9, 0, tzinfo=UTC)) is False
 
 
+def test_overnight_slot_covers_a_following_slotless_open_day():
+    # Monday has no `horaire` key at all (open, hours not published), but
+    # Sunday's overnight slot must still cover Monday 02:00.
+    week = parse_horaires(
+        _raw(
+            [
+                _day(
+                    7,
+                    "Dimanche",
+                    horaire={"@ouverture": "22.00", "@fermeture": "06.00"},
+                ),
+                _day(1, "Lundi"),
+            ]
+        ),
+        "Non",
+    )
+    assert week.is_open_at(datetime(2026, 8, 24, 2, 0, tzinfo=UTC)) is True
+
+
 def test_unparseable_payload_returns_none():
     assert parse_horaires("not json", "Non") is None
     assert parse_horaires(json.dumps({"jour": "nope"}), "Non") is None

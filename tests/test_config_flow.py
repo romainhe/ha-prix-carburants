@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.carburants.api import CarburantsApiError, parse_station
@@ -210,3 +211,63 @@ async def test_options_stations_branch_merges_existing(hass):
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.data[CONF_STATIONS] == ["67000002", "67000026"]
+
+
+async def test_options_flow_deselecting_a_station_purges_its_device(hass):
+    """Walk the whole removal path: options flow -> entry update -> reload -> purge."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=DOMAIN,
+        data={CONF_STATIONS: ["67000002", "67000026"]},
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.carburants.CarburantsApi.async_fetch",
+        AsyncMock(return_value=STATIONS),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    device_registry = dr.async_get(hass)
+    assert (
+        device_registry.async_get_device(identifiers={(DOMAIN, "67000002")}) is not None
+    )
+    assert (
+        device_registry.async_get_device(identifiers={(DOMAIN, "67000026")}) is not None
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    with (
+        patch(
+            "custom_components.carburants.config_flow.CarburantsApi.async_search_text",
+            AsyncMock(return_value=[STATIONS[0]]),
+        ),
+        patch(
+            "custom_components.carburants.CarburantsApi.async_fetch",
+            AsyncMock(return_value=[STATIONS[0]]),
+        ),
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "stations"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "recherche"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"query": "67000"}
+        )
+        assert result["step_id"] == "selection"
+
+        # Deselect 67000026: only the kept station is submitted.
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_STATIONS: ["67000002"]}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.data[CONF_STATIONS] == ["67000002"]
+
+    assert device_registry.async_get_device(identifiers={(DOMAIN, "67000026")}) is None
+    kept_device = device_registry.async_get_device(identifiers={(DOMAIN, "67000002")})
+    assert kept_device is not None

@@ -23,12 +23,12 @@
       }
     },
     "error": {
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "cannot_connect": "Failed to connect",
       "no_results": "No station found for this search.",
       "no_station_selected": "Select at least one station."
     },
     "abort": {
-      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]"
+      "single_instance_allowed": "Already configured. Only a single configuration possible."
     }
   },
   "options": {
@@ -69,7 +69,7 @@
       }
     },
     "error": {
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "cannot_connect": "Failed to connect",
       "no_results": "No station found for this search.",
       "no_station_selected": "Select at least one station."
     }

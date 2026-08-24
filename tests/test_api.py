@@ -156,3 +156,27 @@ async def test_http_error_raises_api_error(aioclient_mock, hass):
 
     with pytest.raises(CarburantsApiError):
         await api.async_fetch(["67000002"])
+
+
+async def test_malformed_json_body_raises_api_error(aioclient_mock, hass):
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    from custom_components.carburants.const import API_URL
+
+    aioclient_mock.get(API_URL, text="not json")
+    api = CarburantsApi(async_get_clientsession(hass))
+
+    with pytest.raises(CarburantsApiError):
+        await api.async_fetch(["67000002"])
+
+
+async def test_non_object_json_body_raises_api_error(aioclient_mock, hass):
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    from custom_components.carburants.const import API_URL
+
+    aioclient_mock.get(API_URL, json=["not", "a", "dict"])
+    api = CarburantsApi(async_get_clientsession(hass))
+
+    with pytest.raises(CarburantsApiError):
+        await api.async_fetch(["67000002"])

@@ -76,9 +76,11 @@ class WeekSchedule:
         day = self.days.get(moment.isoweekday())
         if day is None:
             return None
+        if any(start <= moment < end for start, end in self._intervals(moment)):
+            return True
         if not day.closed and not day.slots:
             return None
-        return any(start <= moment < end for start, end in self._intervals(moment))
+        return False
 
     def next_boundary_after(self, moment: datetime) -> datetime | None:
         """Return the next opening or closing time strictly after `moment`.

@@ -7,7 +7,8 @@
   "issue_tracker": "https://github.com/romainhe/ha-carburants/issues",
   "codeowners": ["@romainhe"],
   "iot_class": "cloud_polling",
-  "integration_type": "service",
+  "integration_type": "hub",
+  "single_config_entry": true,
   "requirements": [],
   "dependencies": []
 }
