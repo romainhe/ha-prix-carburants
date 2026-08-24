@@ -72,31 +72,12 @@ class _SearchMixin:
             return {"base": "no_results"}, []
         return {}, stations
 
+    async def _async_after_search(self) -> ConfigFlowResult:
+        """Continue the flow once a search has produced results.
 
-class CarburantsConfigFlow(ConfigFlow, _SearchMixin, domain=DOMAIN):
-    """Handle the initial configuration."""
-
-    VERSION = 1
-
-    def __init__(self) -> None:
-        """Initialise flow state."""
-        self._results: dict[str, Station] = {}
-
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Return the options flow."""
-        return CarburantsOptionsFlow()
-
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Offer the two search methods."""
-        await self.async_set_unique_id(DOMAIN)
-        self._abort_if_unique_id_configured(error="single_instance_allowed")
-        return self.async_show_menu(
-            step_id="user", menu_options=["recherche", "proximite"]
-        )
+        Overridden by each flow to point at its own next step.
+        """
+        raise NotImplementedError
 
     async def async_step_recherche(
         self, user_input: dict[str, Any] | None = None
@@ -109,7 +90,7 @@ class CarburantsConfigFlow(ConfigFlow, _SearchMixin, domain=DOMAIN):
             )
             if not errors:
                 self._results = {station.id: station for station in stations}
-                return await self.async_step_stations()
+                return await self._async_after_search()
 
         return self.async_show_form(
             step_id="recherche",
@@ -137,7 +118,7 @@ class CarburantsConfigFlow(ConfigFlow, _SearchMixin, domain=DOMAIN):
             )
             if not errors:
                 self._results = {station.id: station for station in stations}
-                return await self.async_step_stations()
+                return await self._async_after_search()
 
         return self.async_show_form(
             step_id="proximite",
@@ -157,6 +138,36 @@ class CarburantsConfigFlow(ConfigFlow, _SearchMixin, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+
+class CarburantsConfigFlow(ConfigFlow, _SearchMixin, domain=DOMAIN):
+    """Handle the initial configuration."""
+
+    VERSION = 1
+
+    def __init__(self) -> None:
+        """Initialise flow state."""
+        self._results: dict[str, Station] = {}
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Return the options flow."""
+        return CarburantsOptionsFlow()
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Offer the two search methods."""
+        await self.async_set_unique_id(DOMAIN)
+        self._abort_if_unique_id_configured(error="single_instance_allowed")
+        return self.async_show_menu(
+            step_id="user", menu_options=["recherche", "proximite"]
+        )
+
+    async def _async_after_search(self) -> ConfigFlowResult:
+        """Move to station selection once a search has produced results."""
+        return await self.async_step_stations()
 
     async def async_step_stations(
         self, user_input: dict[str, Any] | None = None
@@ -208,65 +219,9 @@ class CarburantsOptionsFlow(OptionsFlow, _SearchMixin):
             step_id="stations", menu_options=["recherche", "proximite"]
         )
 
-    async def async_step_recherche(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Search by postal code or city."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            errors, stations = await self._async_run_search(
-                self._api().async_search_text(user_input[CONF_QUERY])
-            )
-            if not errors:
-                self._results = {station.id: station for station in stations}
-                return await self.async_step_selection()
-
-        return self.async_show_form(
-            step_id="recherche",
-            data_schema=vol.Schema({vol.Required(CONF_QUERY): cv.string}),
-            errors=errors,
-        )
-
-    async def async_step_proximite(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Search within a radius of a point."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            location = user_input[CONF_LOCATION]
-            radius = int(
-                min(
-                    max(location.get("radius", DEFAULT_RADIUS_M), MIN_RADIUS_M),
-                    MAX_RADIUS_M,
-                )
-            )
-            errors, stations = await self._async_run_search(
-                self._api().async_search_geo(
-                    location["latitude"], location["longitude"], radius
-                ),
-            )
-            if not errors:
-                self._results = {station.id: station for station in stations}
-                return await self.async_step_selection()
-
-        return self.async_show_form(
-            step_id="proximite",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_LOCATION,
-                        default={
-                            "latitude": self.hass.config.latitude,
-                            "longitude": self.hass.config.longitude,
-                            "radius": DEFAULT_RADIUS_M,
-                        },
-                    ): selector.LocationSelector(
-                        selector.LocationSelectorConfig(radius=True)
-                    )
-                }
-            ),
-            errors=errors,
-        )
+    async def _async_after_search(self) -> ConfigFlowResult:
+        """Move to the merged station picker once a search has results."""
+        return await self.async_step_selection()
 
     async def async_step_selection(
         self, user_input: dict[str, Any] | None = None
