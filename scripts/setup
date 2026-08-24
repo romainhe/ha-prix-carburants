@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Provision a local Home Assistant for the carburants integration.
+#
+# Works in two contexts:
+#   - On a Mac host: creates ./.venv to keep installs out of system Python.
+#   - In the devcontainer: uses the container's Python directly (no venv).
+#
+# Side effects:
+#   - Installs (or upgrades) homeassistant, ruff and the test requirements.
+#   - Symlinks ./custom_components into ./config/custom_components.
+#   - Writes a minimal ./config/configuration.yaml with debug logging.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+PYTHON_BIN="${PYTHON:-python3}"
+
+if [ -n "${REMOTE_CONTAINERS:-}" ] || [ -f /.dockerenv ]; then
+  echo "[setup] Running inside a container — installing into container Python."
+  PIP=("$PYTHON_BIN" -m pip)
+else
+  if [ ! -d .venv ]; then
+    echo "[setup] Creating local virtualenv at .venv (host install)."
+    "$PYTHON_BIN" -m venv .venv
+  fi
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+  PIP=(python -m pip)
+fi
+
+"${PIP[@]}" install --upgrade pip
+"${PIP[@]}" install --upgrade -r requirements-test.txt
+
+mkdir -p config
+if [ ! -e config/custom_components ]; then
+  ln -s "$(pwd)/custom_components" config/custom_components
+fi
+
+if [ ! -f config/configuration.yaml ]; then
+  cat > config/configuration.yaml <<'YAML'
+default_config:
+
+logger:
+  default: info
+  logs:
+    custom_components.carburants: debug
+YAML
+fi
+
+echo "[setup] Done. Run scripts/develop to start Home Assistant."

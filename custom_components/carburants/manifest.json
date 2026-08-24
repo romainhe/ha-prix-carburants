@@ -1,0 +1,13 @@
+{
+  "domain": "carburants",
+  "name": "Carburants",
+  "version": "0.1.0",
+  "config_flow": true,
+  "documentation": "https://github.com/romainhe/ha-carburants",
+  "issue_tracker": "https://github.com/romainhe/ha-carburants/issues",
+  "codeowners": ["@romainhe"],
+  "iot_class": "cloud_polling",
+  "integration_type": "service",
+  "requirements": [],
+  "dependencies": []
+}

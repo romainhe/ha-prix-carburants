@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Run a local Home Assistant instance against ./config with debug logging.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if [ ! -d config ]; then
+  bash scripts/setup
+fi
+
+if [ -z "${REMOTE_CONTAINERS:-}" ] && [ ! -f /.dockerenv ]; then
+  if [ ! -d .venv ]; then
+    echo "Run scripts/setup first." >&2
+    exit 1
+  fi
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+fi
+
+exec hass --config ./config --debug
