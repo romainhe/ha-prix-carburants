@@ -1,5 +1,5 @@
 {
-  "name": "Carburants",
+  "name": "Prix carburants",
   "render_readme": true,
   "homeassistant": "2024.11.0"
 }

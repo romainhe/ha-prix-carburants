@@ -1,6 +1,6 @@
 {
   "domain": "carburants",
-  "name": "Carburants",
+  "name": "Prix carburants",
   "codeowners": ["@romainhe"],
   "config_flow": true,
   "dependencies": [],

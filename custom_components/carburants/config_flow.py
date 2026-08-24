@@ -180,7 +180,7 @@ class CarburantsConfigFlow(ConfigFlow, _SearchMixin, domain=DOMAIN):
                 errors["base"] = "no_station_selected"
             else:
                 return self.async_create_entry(
-                    title="Carburants", data={CONF_STATIONS: list(selected)}
+                    title="Prix carburants", data={CONF_STATIONS: list(selected)}
                 )
 
         options = {
