@@ -1433,7 +1433,7 @@ Comportement :
 
 1. Chaque poll appelle `api.async_fetch(self.station_ids)`. Une `CarburantsApiError` est convertie en `UpdateFailed`.
 2. Le premier poll enregistre l'état et n'émet rien (`_primed`).
-3. Ensuite, pour chaque station présente **dans les deux** snapshots, et pour chaque carburant présent dans `tracked_fuels` du nouveau snapshot :
+3. Ensuite, pour chaque station présente **dans les deux** snapshots, et pour chaque carburant présent dans `tracked_fuels` de l'**union** des deux snapshots (un carburant vendu qui bascule en rupture `definitive` quitte `tracked_fuels` ; ne regarder que le nouveau snapshot rendrait l'intégration muette sur cette rupture, alors qu'un carburant jamais distribué n'est dans aucun des deux snapshots et reste exclu) :
    - **prix** : si l'ancien et le nouveau prix sont tous deux non nuls et que `abs(delta) >= price_threshold`, émettre `carburants_price_changed` ;
    - **rupture** : si `in_outage` bascule, émettre `carburants_fuel_outage` avec `state` = `start` ou `end`.
 4. `entity_id` est résolu au moment de l'émission via le registre d'entités ; il vaut `None` si l'entité n'existe pas encore.

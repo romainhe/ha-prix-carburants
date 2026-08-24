@@ -238,6 +238,13 @@ drapeau `_primed` : **le premier poll après démarrage amorce l'état en silenc
 sur le modèle de `powens_new_transaction`. Les variations survenues pendant un
 arrêt de HA ne sont donc pas rejouées.
 
+Les carburants examinés à chaque diff sont l'**union** des `tracked_fuels` des deux
+snapshots, et non ceux du seul nouveau. Un carburant que la station vendait et qui
+bascule en rupture `definitive` quitte `tracked_fuels` : ne regarder que le nouveau
+snapshot rendrait l'intégration muette sur cette rupture, alors que c'est
+précisément ce qu'elle promet de signaler. Un carburant jamais distribué n'est dans
+aucun des deux snapshots, donc le bruit reste écarté.
+
 Deux `event_type`, la direction étant un champ de données (filtrable en une ligne
 dans un `trigger`) :
 
