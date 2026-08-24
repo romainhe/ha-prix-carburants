@@ -40,6 +40,7 @@ class CarburantsCoordinator(DataUpdateCoordinator[dict[str, Station]]):
         self.station_ids = station_ids
         self._price_threshold = price_threshold
         self._previous: dict[str, dict[str, FuelState]] = {}
+        self._previous_tracked: dict[str, set[str]] = {}
         self._primed = False
 
         super().__init__(
@@ -64,8 +65,13 @@ class CarburantsCoordinator(DataUpdateCoordinator[dict[str, Station]]):
     def _process_events(self, data: dict[str, Station]) -> None:
         """Diff against the previous poll and fire the resulting events."""
         previous = self._previous
+        previous_tracked = self._previous_tracked
         self._previous = {
             station_id: dict(station.fuels) for station_id, station in data.items()
+        }
+        self._previous_tracked = {
+            station_id: set(station.tracked_fuels)
+            for station_id, station in data.items()
         }
 
         if not self._primed:
@@ -76,9 +82,14 @@ class CarburantsCoordinator(DataUpdateCoordinator[dict[str, Station]]):
             old_fuels = previous.get(station_id)
             if old_fuels is None:
                 continue
-            for fuel, state in station.tracked_fuels.items():
+            old_tracked = previous_tracked.get(station_id, set())
+            new_tracked = set(station.tracked_fuels)
+            for fuel in old_tracked | new_tracked:
                 old_state = old_fuels.get(fuel)
                 if old_state is None:
+                    continue
+                state = station.fuels.get(fuel)
+                if state is None:
                     continue
                 self._fire_price_event(station, fuel, old_state, state)
                 self._fire_outage_event(station, fuel, old_state, state)

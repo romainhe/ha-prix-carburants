@@ -161,6 +161,30 @@ async def test_outage_start_and_end(hass):
     assert price_events == []
 
 
+async def test_definitive_outage_on_a_sold_fuel_still_fires(hass):
+    outage_events = async_capture_events(hass, EVENT_FUEL_OUTAGE)
+    price_events = async_capture_events(hass, EVENT_PRICE_CHANGED)
+    coordinator = _coordinator(
+        hass,
+        FakeApi(
+            [
+                [_station(1.899)],
+                [_station(None, outage_type="definitive")],
+            ]
+        ),
+    )
+
+    await coordinator.async_refresh()
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert len(outage_events) == 1
+    assert outage_events[0].data["state"] == "start"
+    assert outage_events[0].data["outage_type"] == "definitive"
+    assert outage_events[0].data["fuel"] == "gazole"
+    assert price_events == []
+
+
 async def test_station_missing_from_response_fires_nothing(hass):
     events = async_capture_events(hass, EVENT_PRICE_CHANGED)
     coordinator = _coordinator(hass, FakeApi([[_station(1.899)], []]))
