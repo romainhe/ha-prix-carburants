@@ -6,14 +6,14 @@
 
 **Architecture :** Un client HTTP mince au-dessus de l'API Opendatasoft du ministère de l'Économie, un `DataUpdateCoordinator` unique qui rafraîchit toutes les stations en une requête et calcule les events par diff avec le poll précédent, puis deux plateformes d'entités (`sensor`, `binary_sensor`) montées sur un device par station. Toute la logique de parsing est isolée dans des fonctions pures testables sans Home Assistant.
 
-**Tech Stack :** Python 3.13, Home Assistant ≥ 2024.10, `aiohttp` (session partagée de HA), `voluptuous`, ruff, `pytest-homeassistant-custom-component`.
+**Tech Stack :** Python 3.13, Home Assistant ≥ 2024.11, `aiohttp` (session partagée de HA), `voluptuous`, ruff, `pytest-homeassistant-custom-component`.
 
 **Spec :** `docs/superpowers/specs/2026-08-24-ha-carburants-design.md`
 
 ## Global Constraints
 
 - Domaine de l'intégration : `carburants`. Tous les préfixes d'events, clés de traduction et chemins en découlent.
-- Version minimale de Home Assistant : `2024.10.0` (déclarée dans `hacs.json`).
+- Version minimale de Home Assistant : `2024.11.0` (déclarée dans `hacs.json`). C'est la première version où `OptionsFlow.config_entry` est renseigné par le framework — le flow ne doit donc jamais l'assigner lui-même.
 - Aucune dépendance Python externe : `manifest.json` garde `"requirements": []`. Utiliser la session `aiohttp` de HA via `async_get_clientsession`.
 - Endpoint unique : `https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/records`. Timeout 10 s, `limit=100`.
 - Carburants gérés, dans cet ordre, avec ces libellés exacts (ce sont ceux du dataset) : `gazole`→`Gazole`, `sp95`→`SP95`, `sp98`→`SP98`, `e10`→`E10`, `e85`→`E85`, `gplc`→`GPLc`.
@@ -141,8 +141,6 @@ ruff
 
 import pytest
 
-pytest_plugins = ["pytest_homeassistant_custom_component"]
-
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
@@ -174,7 +172,7 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 {
   "name": "Carburants",
   "render_readme": true,
-  "homeassistant": "2024.10.0"
+  "homeassistant": "2024.11.0"
 }
 ```
 
@@ -1163,7 +1161,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from math import asin, cos, radians, sin, sqrt
 
@@ -1398,14 +1396,7 @@ class CarburantsApi:
             distance = _haversine_km(
                 latitude, longitude, station.latitude, station.longitude
             )
-            stations.append(
-                Station(
-                    **{
-                        **station.__dict__,
-                        "distance_km": round(distance, 1),
-                    }
-                )
-            )
+            stations.append(replace(station, distance_km=round(distance, 1)))
         stations.sort(
             key=lambda station: (
                 station.distance_km if station.distance_km is not None else 1e9
@@ -2124,7 +2115,7 @@ class _SearchMixin:
         return CarburantsApi(async_get_clientsession(self.hass))
 
     async def _async_run_search(
-        self, step_id: str, coro
+        self, coro
     ) -> tuple[dict[str, str], list[Station]]:
         """Run a search coroutine, mapping API failures to form errors."""
         try:
@@ -2168,7 +2159,7 @@ class CarburantsConfigFlow(ConfigFlow, _SearchMixin, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             errors, stations = await self._async_run_search(
-                "recherche", self._api().async_search_text(user_input[CONF_QUERY])
+                self._api().async_search_text(user_input[CONF_QUERY])
             )
             if not errors:
                 self._results = {station.id: station for station in stations}
@@ -2192,7 +2183,6 @@ class CarburantsConfigFlow(ConfigFlow, _SearchMixin, domain=DOMAIN):
                     MAX_RADIUS_M)
             )
             errors, stations = await self._async_run_search(
-                "proximite",
                 self._api().async_search_geo(
                     location["latitude"], location["longitude"], radius
                 ),
@@ -2277,7 +2267,7 @@ class CarburantsOptionsFlow(OptionsFlow, _SearchMixin):
         errors: dict[str, str] = {}
         if user_input is not None:
             errors, stations = await self._async_run_search(
-                "recherche", self._api().async_search_text(user_input[CONF_QUERY])
+                self._api().async_search_text(user_input[CONF_QUERY])
             )
             if not errors:
                 self._results = {station.id: station for station in stations}
@@ -2301,7 +2291,6 @@ class CarburantsOptionsFlow(OptionsFlow, _SearchMixin):
                     MAX_RADIUS_M)
             )
             errors, stations = await self._async_run_search(
-                "proximite",
                 self._api().async_search_geo(
                     location["latitude"], location["longitude"], radius
                 ),
